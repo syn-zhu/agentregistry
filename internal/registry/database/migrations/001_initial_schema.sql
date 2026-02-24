@@ -38,7 +38,7 @@ CREATE TABLE servers (
     unpublished_date TIMESTAMP WITH TIME ZONE,
     
     -- Semantic embedding columns for vector search
-    semantic_embedding vector(1536),
+    semantic_embedding vector(1024),
     semantic_embedding_provider TEXT,
     semantic_embedding_model TEXT,
     semantic_embedding_dimensions INTEGER,
@@ -182,7 +182,7 @@ CREATE TABLE agents (
     unpublished_date TIMESTAMP WITH TIME ZONE,
     
     -- Semantic embedding columns for vector search
-    semantic_embedding vector(1536),
+    semantic_embedding vector(1024),
     semantic_embedding_provider TEXT,
     semantic_embedding_model TEXT,
     semantic_embedding_dimensions INTEGER,

@@ -12,10 +12,6 @@ func Validate(cfg *Config) error {
 		if cfg.Embeddings.Dimensions <= 0 {
 			return fmt.Errorf("embeddings dimensions must be positive (got %d)", cfg.Embeddings.Dimensions)
 		}
-		// Database schema currently provisions vector(1536). Reject mismatches early.
-		if cfg.Embeddings.Dimensions != 1536 {
-			return fmt.Errorf("embeddings dimensions must equal 1536 to match database schema (got %d)", cfg.Embeddings.Dimensions)
-		}
 		if cfg.Embeddings.Model == "" {
 			return fmt.Errorf("embeddings model must be specified when embeddings are enabled")
 		}
