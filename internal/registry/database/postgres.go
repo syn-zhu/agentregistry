@@ -141,39 +141,8 @@ func ensureVectorDimensions(ctx context.Context, conn *pgx.Conn, dimensions int)
 	}()
 
 	for _, table := range []string{"servers", "agents"} {
-		idx := fmt.Sprintf("idx_%s_semantic_embedding_hnsw", table)
-
-		if columnExists {
-			// Column exists with wrong dimension: drop index, clear data, alter type.
-			log.Printf("Reconciling %s.semantic_embedding: %d -> %d dimensions", table, currentDim, dimensions)
-
-			if _, err := tx.Exec(ctx, fmt.Sprintf("DROP INDEX IF EXISTS %s", idx)); err != nil {
-				return fmt.Errorf("failed to drop index %s: %w", idx, err)
-			}
-			if _, err := tx.Exec(ctx, fmt.Sprintf("UPDATE %s SET semantic_embedding = NULL", table)); err != nil {
-				return fmt.Errorf("failed to clear embeddings in %s: %w", table, err)
-			}
-			alter := fmt.Sprintf("ALTER TABLE %s ALTER COLUMN semantic_embedding TYPE vector(%d)", table, dimensions)
-			if _, err := tx.Exec(ctx, alter); err != nil {
-				return fmt.Errorf("failed to alter %s.semantic_embedding to vector(%d): %w", table, dimensions, err)
-			}
-		} else {
-			// Column doesn't exist: add it.
-			log.Printf("Creating %s.semantic_embedding as vector(%d)", table, dimensions)
-
-			addCol := fmt.Sprintf("ALTER TABLE %s ADD COLUMN semantic_embedding vector(%d)", table, dimensions)
-			if _, err := tx.Exec(ctx, addCol); err != nil {
-				return fmt.Errorf("failed to add semantic_embedding to %s: %w", table, err)
-			}
-		}
-
-		// Create (or recreate) the HNSW index.
-		createIdx := fmt.Sprintf(
-			"CREATE INDEX IF NOT EXISTS %s ON %s USING hnsw (semantic_embedding vector_cosine_ops)",
-			idx, table,
-		)
-		if _, err := tx.Exec(ctx, createIdx); err != nil {
-			return fmt.Errorf("failed to create index %s: %w", idx, err)
+		if err := reconcileTableEmbedding(ctx, tx, table, columnExists, currentDim, dimensions); err != nil {
+			return err
 		}
 	}
 
@@ -185,6 +154,56 @@ func ensureVectorDimensions(ctx context.Context, conn *pgx.Conn, dimensions int)
 		log.Printf("Vector dimensions reconciled to %d (embeddings cleared; regeneration required)", dimensions)
 	} else {
 		log.Printf("Vector columns created with %d dimensions", dimensions)
+	}
+	return nil
+}
+
+// reconcileTableEmbedding creates or alters the semantic_embedding column for a
+// single table and (re)creates its HNSW index.
+func reconcileTableEmbedding(ctx context.Context, tx pgx.Tx, table string, columnExists bool, currentDim, dimensions int) error {
+	idx := fmt.Sprintf("idx_%s_semantic_embedding_hnsw", table)
+	if columnExists {
+		return alterEmbeddingColumn(ctx, tx, table, idx, currentDim, dimensions)
+	}
+	return addEmbeddingColumn(ctx, tx, table, idx, dimensions)
+}
+
+// alterEmbeddingColumn changes an existing semantic_embedding column to a new dimension.
+func alterEmbeddingColumn(ctx context.Context, tx pgx.Tx, table, idx string, currentDim, dimensions int) error {
+	log.Printf("Reconciling %s.semantic_embedding: %d -> %d dimensions", table, currentDim, dimensions)
+
+	if _, err := tx.Exec(ctx, fmt.Sprintf("DROP INDEX IF EXISTS %s", idx)); err != nil {
+		return fmt.Errorf("failed to drop index %s: %w", idx, err)
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf("UPDATE %s SET semantic_embedding = NULL", table)); err != nil {
+		return fmt.Errorf("failed to clear embeddings in %s: %w", table, err)
+	}
+	alter := fmt.Sprintf("ALTER TABLE %s ALTER COLUMN semantic_embedding TYPE vector(%d)", table, dimensions)
+	if _, err := tx.Exec(ctx, alter); err != nil {
+		return fmt.Errorf("failed to alter %s.semantic_embedding to vector(%d): %w", table, dimensions, err)
+	}
+	return createEmbeddingIndex(ctx, tx, table, idx)
+}
+
+// addEmbeddingColumn adds a new semantic_embedding column with the given dimension.
+func addEmbeddingColumn(ctx context.Context, tx pgx.Tx, table, idx string, dimensions int) error {
+	log.Printf("Creating %s.semantic_embedding as vector(%d)", table, dimensions)
+
+	addCol := fmt.Sprintf("ALTER TABLE %s ADD COLUMN semantic_embedding vector(%d)", table, dimensions)
+	if _, err := tx.Exec(ctx, addCol); err != nil {
+		return fmt.Errorf("failed to add semantic_embedding to %s: %w", table, err)
+	}
+	return createEmbeddingIndex(ctx, tx, table, idx)
+}
+
+// createEmbeddingIndex creates the HNSW index for semantic embedding similarity search.
+func createEmbeddingIndex(ctx context.Context, tx pgx.Tx, table, idx string) error {
+	createIdx := fmt.Sprintf(
+		"CREATE INDEX IF NOT EXISTS %s ON %s USING hnsw (semantic_embedding vector_cosine_ops)",
+		idx, table,
+	)
+	if _, err := tx.Exec(ctx, createIdx); err != nil {
+		return fmt.Errorf("failed to create index %s: %w", idx, err)
 	}
 	return nil
 }
